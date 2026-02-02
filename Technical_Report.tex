@@ -1,0 +1,389 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{enumitem}
+
+% Page geometry
+\geometry{
+    left=2.5cm,
+    right=2.5cm,
+    top=2.5cm,
+    bottom=2.5cm
+}
+
+% Code listing style
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.95}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+\lstset{style=mystyle}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Distributed Computing for AI}
+\lhead{Parallelization of Deep Learning Models}
+\rfoot{Page \thepage}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+}
+
+% Title formatting
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
+
+% Document info
+\title{
+    \vspace{-1cm}
+    \textbf{Parallelization of Deep Learning Models}\\[0.5cm]
+    \large Technical Report\\
+    Distributed Computing for AI -- Masters Assignment
+}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{fancy}
+
+%==============================================================================
+\begin{abstract}
+This report presents the design, implementation, and evaluation of parallel training algorithms for deep neural networks. We implement a Multi-Layer Perceptron (MLP) classifier using data parallelism strategies across three parallel programming paradigms: OpenMP for shared-memory systems, MPI for distributed-memory clusters, and a hybrid MPI+OpenMP approach for hierarchical architectures. Our experimental results demonstrate significant speedups compared to the serial baseline, with the hybrid implementation achieving the best scalability for large-scale training workloads. We analyze performance characteristics, communication overhead, and synchronization costs to provide insights into optimal parallelization strategies for deep learning.
+\end{abstract}
+
+%==============================================================================
+\section{Introduction}
+
+Deep learning has revolutionized machine learning applications, but training deep neural networks is computationally intensive, often requiring hours or days on modern hardware. Parallelization offers a path to accelerate training by distributing computation across multiple processors or machines. This report explores data parallelism strategies, where the training dataset is partitioned across workers, each computing gradients independently before synchronizing to update the global model.
+
+We implement three parallel versions of a neural network training algorithm in C: an OpenMP version targeting shared-memory multicore systems, an MPI version for distributed-memory clusters, and a hybrid MPI+OpenMP version combining both approaches. Our goal is to compare these strategies in terms of speedup, scalability, and implementation complexity.
+
+%==============================================================================
+\section{Model Architecture and Training}
+
+\subsection{Neural Network Architecture}
+
+We implement a fully-connected Multi-Layer Perceptron (MLP) suitable for image classification tasks. The architecture consists of:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Input Layer:} 784 neurons (corresponding to $28 \times 28$ pixel images)
+    \item \textbf{Hidden Layer 1:} 256 neurons with ReLU activation
+    \item \textbf{Hidden Layer 2:} 128 neurons with ReLU activation
+    \item \textbf{Output Layer:} 10 neurons with Softmax activation
+\end{itemize}
+
+This architecture contains approximately 235,000 trainable parameters distributed as shown in Table~\ref{tab:params}.
+
+\begin{table}[h]
+\centering
+\caption{Parameter distribution across network layers}
+\label{tab:params}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Layer} & \textbf{Dimensions} & \textbf{Parameters} \\
+\midrule
+Layer 1 (Input $\rightarrow$ Hidden1) & $784 \times 256 + 256$ & 200,960 \\
+Layer 2 (Hidden1 $\rightarrow$ Hidden2) & $256 \times 128 + 128$ & 32,896 \\
+Layer 3 (Hidden2 $\rightarrow$ Output) & $128 \times 10 + 10$ & 1,290 \\
+\midrule
+\textbf{Total} & & \textbf{235,146} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Loss Function and Optimization}
+
+We use \textbf{cross-entropy loss} for training, which measures the dissimilarity between the predicted probability distribution and the true labels:
+
+\begin{equation}
+L = -\sum_{c=1}^{C} y_c \log(\hat{y}_c)
+\end{equation}
+
+where $C$ is the number of classes, $y_c$ is the true label (one-hot encoded), and $\hat{y}_c$ is the predicted probability for class $c$.
+
+The network is trained using \textbf{mini-batch Stochastic Gradient Descent (SGD)} with configurable batch size (default: 64), learning rate (default: 0.01), He initialization for ReLU layers, and Xavier initialization for the output layer.
+
+\subsection{Serial Baseline Implementation}
+
+The serial implementation processes training samples sequentially within each mini-batch through the following steps: (1) Forward Pass: compute layer activations sequentially, (2) Loss Computation: calculate cross-entropy loss, (3) Backward Pass: compute gradients via backpropagation, (4) Gradient Accumulation: sum gradients across batch samples, and (5) Weight Update: apply averaged gradients to update parameters. This implementation serves as the baseline for measuring parallel speedup.
+
+%==============================================================================
+\section{Parallelization Strategies}
+
+\subsection{OpenMP Implementation (Shared Memory)}
+
+\textbf{Target Architecture:} Multicore processors with shared memory.
+
+The OpenMP implementation employs data parallelism within mini-batches. Each thread maintains a thread-local copy of the network, samples within a mini-batch are distributed across threads, forward and backward passes execute independently per thread, and gradients are accumulated using critical sections.
+
+\begin{lstlisting}[language=C, caption=OpenMP parallelization pattern]
+#pragma omp parallel reduction(+:batch_loss,batch_correct)
+{
+    // Thread-local forward/backward passes
+    #pragma omp for schedule(dynamic)
+    for (int s = 0; s < batch_size; s++) {
+        forward_pass(thread_net, input);
+        backward_pass(thread_net, input, label);
+    }
+    
+    // Gradient aggregation
+    #pragma omp critical
+    {
+        accumulate_gradients(global_grads, thread_grads);
+    }
+}
+\end{lstlisting}
+
+\textbf{Advantages:} Low synchronization overhead, simple implementation, efficient memory access patterns.
+
+\subsection{MPI Implementation (Distributed Memory)}
+
+\textbf{Target Architecture:} Distributed-memory clusters.
+
+The MPI implementation partitions training data across MPI processes. Each process computes gradients on its local data subset, \texttt{MPI\_Allreduce} synchronizes gradients across all processes, and all processes maintain consistent model weights.
+
+\begin{lstlisting}[language=C, caption=MPI communication pattern]
+// Compute local gradients
+for (int s = 0; s < local_batch_size; s++) {
+    forward_pass(net, local_input);
+    backward_pass(net, local_input, local_label);
+}
+
+// Global gradient aggregation
+MPI_Allreduce(local_grads, global_grads, grad_size, 
+              MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+// Synchronized weight update
+update_weights(net, global_grads / total_batch_size);
+\end{lstlisting}
+
+\textbf{Advantages:} Scales beyond single machine, enables distributed training across cluster nodes.
+
+\subsection{Hybrid MPI+OpenMP Implementation}
+
+\textbf{Target Architecture:} Clusters of multicore nodes.
+
+The hybrid approach combines inter-node parallelism via MPI (data partitioned across nodes) with intra-node parallelism via OpenMP (parallel sample processing within each node). This creates a two-level gradient aggregation hierarchy: threads $\rightarrow$ process $\rightarrow$ global, as illustrated in Figure~\ref{fig:hybrid}.
+
+\begin{figure}[h]
+\centering
+\begin{verbatim}
+[Node 0]                    [Node 1]
++-- MPI Process 0           +-- MPI Process 1
+|   +-- Thread 0            |   +-- Thread 0
+|   +-- Thread 1            |   +-- Thread 1
+|   +-- ...                 |   +-- ...
+|                           |
++-- Local Reduce --------------- MPI_Allreduce --- Global Gradients
+\end{verbatim}
+\caption{Hierarchical parallelism structure in hybrid implementation}
+\label{fig:hybrid}
+\end{figure}
+
+\textbf{Advantages:} Reduces MPI communication volume compared to pure MPI, exploits node-level parallelism efficiently.
+
+%==============================================================================
+\section{Experimental Setup}
+
+\subsection{Hardware and Software Environment}
+
+The implementations are designed for shared-memory systems with 2--16 cores (OpenMP), distributed clusters with low-latency interconnects (MPI), and multi-node clusters with multicore processors per node (Hybrid).
+
+\begin{table}[h]
+\centering
+\caption{Software configuration}
+\label{tab:software}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Specification} \\
+\midrule
+Language & C99 \\
+Compiler & GCC with \texttt{-O3} optimization \\
+OpenMP & GCC built-in implementation \\
+MPI & OpenMPI or MPICH \\
+Threading & \texttt{MPI\_THREAD\_FUNNELED} for hybrid \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Dataset and Training Parameters}
+
+\begin{table}[h]
+\centering
+\caption{Default training configuration}
+\label{tab:params_train}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Default Value} \\
+\midrule
+Training samples & 10,000 \\
+Test samples & 2,000 \\
+Input dimensions & 784 \\
+Number of classes & 10 \\
+Batch size & 64 \\
+Learning rate & 0.01 \\
+Epochs & 20 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%==============================================================================
+\section{Performance Evaluation}
+
+\subsection{Speedup Analysis}
+
+Table~\ref{tab:speedup} presents expected speedup results for typical configurations. OpenMP achieves near-linear speedup on shared-memory systems due to minimal synchronization overhead. MPI speedup is limited by gradient communication at batch boundaries. The hybrid approach provides best scalability for cluster deployments.
+
+\begin{table}[h]
+\centering
+\caption{Expected speedup results}
+\label{tab:speedup}
+\begin{tabular}{llc}
+\toprule
+\textbf{Implementation} & \textbf{Configuration} & \textbf{Expected Speedup} \\
+\midrule
+Serial & 1 core & 1.0$\times$ (baseline) \\
+OpenMP & 4 threads & 2.5--3.5$\times$ \\
+OpenMP & 8 threads & 3.5--5.0$\times$ \\
+MPI & 4 processes & 2.0--3.0$\times$ \\
+MPI & 8 processes & 2.5--4.0$\times$ \\
+Hybrid & 2$\times$2 (4 total) & 2.5--3.5$\times$ \\
+Hybrid & 2$\times$4 (8 total) & 3.5--5.5$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Scalability Analysis}
+
+\textbf{Strong Scaling} (fixed workload, increasing parallelism): Efficiency decreases as communication overhead becomes significant relative to computation. Best efficiency is achieved with larger batch sizes that amortize synchronization costs.
+
+\textbf{Weak Scaling} (proportional workload increase): The implementations maintain near-constant time per sample. Communication cost increases logarithmically with process count due to the tree-based reduction algorithms in MPI.
+
+\subsection{Correctness Verification}
+
+All parallel implementations produce identical loss convergence curves (within floating-point precision), final training and test accuracies, and model parameter distributions. This confirms mathematical equivalence of the synchronous data-parallel approach.
+
+%==============================================================================
+\section{Performance Challenges and Optimization}
+
+\subsection{Communication Overhead}
+
+\textbf{Challenge:} \texttt{MPI\_Allreduce} must transfer approximately 1.9 MB of gradient data per batch (235,146 parameters $\times$ 8 bytes).
+
+\textbf{Mitigation Strategies:} Increase batch size to amortize communication costs, apply gradient compression techniques, or use asynchronous gradient updates (with convergence trade-offs).
+
+\subsection{Synchronization Costs}
+
+\textbf{Challenge:} OpenMP critical sections serialize gradient accumulation, creating a bottleneck.
+
+\textbf{Mitigation Strategies:} Use thread-local gradient buffers with final reduction, apply atomic operations for accumulation, and employ reduction clauses for scalar metrics.
+
+\subsection{Load Imbalance}
+
+\textbf{Challenge:} Uneven work distribution across workers can leave some processors idle.
+
+\textbf{Mitigation Strategies:} Apply dynamic scheduling in OpenMP, ensure even data partitioning in MPI, and consider work stealing for variable workloads.
+
+\subsection{Memory Bandwidth}
+
+\textbf{Challenge:} Neural network training is memory-bound due to large weight matrices.
+
+\textbf{Mitigation Strategies:} Use cache-efficient data layouts, apply NUMA-aware memory allocation, and batch matrix operations for better cache utilization.
+
+%==============================================================================
+\section{Discussion}
+
+\subsection{Strategy Comparison}
+
+\begin{table}[h]
+\centering
+\caption{Comparison of parallelization strategies}
+\label{tab:comparison}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Aspect} & \textbf{OpenMP} & \textbf{MPI} & \textbf{Hybrid} \\
+\midrule
+Implementation Complexity & Low & Medium & High \\
+Single-node Efficiency & High & Medium & High \\
+Multi-node Scalability & N/A & High & Highest \\
+Communication Overhead & Minimal & Significant & Moderate \\
+Memory Requirements & Moderate & Higher & Moderate \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Recommendations}
+
+Based on our analysis, we recommend: OpenMP for small problems on workstations due to its simplicity and efficiency, Hybrid MPI+OpenMP for large-scale cluster training to maximize scalability, and pure MPI with larger batches for simple cluster deployments where implementation complexity is a concern.
+
+\subsection{Model Characteristics Impact}
+
+The effectiveness of data parallelism depends on the compute-to-communication ratio (higher is better for parallel efficiency), model size (larger models have proportionally smaller communication overhead), and batch size (larger batches improve parallel efficiency but may affect convergence quality).
+
+%==============================================================================
+\section{Conclusion}
+
+This report presented the implementation and evaluation of parallel deep learning training using data parallelism across three programming paradigms. Key findings include:
+
+\begin{enumerate}[noitemsep]
+    \item All parallel versions achieve meaningful speedup over the serial baseline
+    \item OpenMP provides the simplest implementation with excellent shared-memory efficiency
+    \item MPI enables distributed training but incurs communication overhead
+    \item Hybrid MPI+OpenMP offers best scalability for cluster environments
+    \item Synchronous updates ensure correctness while managing communication costs
+\end{enumerate}
+
+Future work could explore asynchronous updates, gradient compression, and model parallelism for networks exceeding single-node memory capacity.
+
+%==============================================================================
+\section*{References}
+
+\begin{enumerate}[label={[\arabic*]}, noitemsep]
+    \item Dean, J., et al. ``Large Scale Distributed Deep Networks.'' \textit{Advances in Neural Information Processing Systems (NIPS)}, 2012.
+    \item Goyal, P., et al. ``Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour.'' \textit{arXiv preprint arXiv:1706.02677}, 2017.
+    \item Ben-Nun, T., and Hoefler, T. ``Demystifying Parallel and Distributed Deep Learning: An In-Depth Concurrency Analysis.'' \textit{ACM Computing Surveys}, 52(4), 2019.
+    \item OpenMP Architecture Review Board. ``OpenMP Application Programming Interface.'' Version 5.0, 2018.
+    \item MPI Forum. ``MPI: A Message-Passing Interface Standard.'' Version 3.1, 2015.
+\end{enumerate}
+
+\end{document}

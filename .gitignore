@@ -1,0 +1,47 @@
+# Compiled binaries
+bin/
+*.o
+*.out
+*.exe
+
+# Dataset files (too large for git)
+data/mnist/
+*.idx3-ubyte
+*.idx1-ubyte
+
+# Metrics output files
+*_metrics.csv
+summary_table.csv
+
+# LaTeX auxiliary files
+*.aux
+*.log
+*.toc
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.bbl
+*.blg
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+
+# Temporary files
+*.tmp
+*.temp
