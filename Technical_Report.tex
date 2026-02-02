@@ -5,6 +5,7 @@
 \usepackage[T1]{fontenc}
 \usepackage{geometry}
 \usepackage{graphicx}
+\graphicspath{{./plots/}{./}}  % Look for images in plots/ directory
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{booktabs}
@@ -293,7 +294,63 @@ Hybrid & 2$\times$4 (8 total) & 3.5--5.5$\times$ \\
 \end{tabular}
 \end{table}
 
+Figure~\ref{fig:all_metrics} presents the comprehensive performance comparison across all implementations, including training loss convergence, accuracy progression, time per epoch, and speedup analysis.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{plots/all_metrics.png}
+\caption{Comprehensive performance comparison: (a) Training loss convergence over epochs, (b) Training accuracy progression, (c) Time per epoch for each implementation, (d) Speedup relative to serial baseline. All parallel implementations achieve identical convergence while providing significant speedup.}
+\label{fig:all_metrics}
+\end{figure}
+
+\subsection{Training Convergence}
+
+Figure~\ref{fig:loss_accuracy} shows the training loss and accuracy curves in detail. All implementations converge to the same final values, demonstrating the correctness of the parallel gradient aggregation.
+
+\begin{figure}[htbp]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{plots/loss_comparison.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{plots/accuracy_comparison.png}
+\end{minipage}
+\caption{Training convergence comparison: (Left) Loss curves showing identical convergence across all implementations. (Right) Accuracy curves demonstrating consistent learning behavior.}
+\label{fig:loss_accuracy}
+\end{figure}
+
+\subsection{Speedup and Time Analysis}
+
+Figure~\ref{fig:speedup_time} presents the speedup achieved by each parallel implementation and the total training time comparison.
+
+\begin{figure}[htbp]
+\centering
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{plots/speedup_comparison.png}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{plots/total_time_comparison.png}
+\end{minipage}
+\caption{Performance metrics: (Left) Speedup relative to serial baseline---higher is better. (Right) Total training time---lower is better. OpenMP with 4 threads achieves approximately 3$\times$ speedup.}
+\label{fig:speedup_time}
+\end{figure}
+
 \subsection{Scalability Analysis}
+
+Figure~\ref{fig:scalability} shows the strong scaling behavior of the parallel implementations. Ideal linear scaling is shown as a dashed line for reference.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{plots/scalability.png}
+\caption{Strong scaling analysis: (Left) OpenMP scalability with increasing thread count. (Right) MPI scalability with increasing process count. The dashed line represents ideal linear speedup. Deviation from ideal scaling is due to synchronization overhead and Amdahl's Law.}
+\label{fig:scalability}
+\end{figure}
 
 \textbf{Strong Scaling} (fixed workload, increasing parallelism): Efficiency decreases as communication overhead becomes significant relative to computation. Best efficiency is achieved with larger batch sizes that amortize synchronization costs.
 
